@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peeking Inside the Black Box: SHAP & Feature Importance</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Custom Google Font: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* Custom styles to complement Tailwind */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+
+        /* Custom transition for chart bars and waterfall elements */
+        .transition-all {
+            transition: all 0.5s ease-in-out;
+        }
+        
+        /* Styles for the glossary pop-ups */
+        .glossary-popup {
+            display: none;
+            position: absolute;
+            z-index: 10;
+            border: 1px solid #e2e8f0; /* slate-200 */
+            border-radius: 0.5rem;
+            background-color: white;
+            padding: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            max-width: 300px;
+        }
+
+        .glossary-term:hover + .glossary-popup, .glossary-popup:hover {
+            display: block;
+        }
+        
+        /* Animation for the alert banner */
+        @keyframes slide-in {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .alert-banner {
+            animation: slide-in 0.5s ease-out forwards;
+        }
+
+        /* Styling for SHAP waterfall bars */
+        .shap-bar {
+            transition: width 0.7s ease-out;
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <!-- Header -->
+    <header class="bg-white shadow-md p-4 sm:p-6">
+        <div class="container mx-auto">
+            <h1 class="text-2xl sm:text-3xl font-bold text-slate-900">Peeking Inside the Black Box</h1>
+            <p class="text-slate-600 mt-1">An Interactive Guide to SHAP & Feature Importance</p>
+        </div>
+    </header>
+
+    <!-- Correlation Warning Banner -->
+    <div id="correlation-alert" class="hidden container mx-auto mt-4">
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-md alert-banner" role="alert">
+            <p class="font-bold">High Correlation Warning!</p>
+            <p>High correlation detected between features. This may distort importance rankings.</p>
+        </div>
+    </div>
+
+    <main class="container mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        <!-- Left Column: Controls -->
+        <div class="lg:col-span-1 space-y-6">
+            
+            <!-- Dataset and Model Card -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">1. Model & Data</h2>
+                <p class="text-slate-600 mb-4">We've loaded a mock <code class="bg-slate-100 p-1 rounded">iris.csv</code> dataset and trained a simple Decision Tree model in your browser to predict flower species.</p>
+                <div class="bg-slate-50 p-3 rounded-md">
+                    <p><strong>Model Accuracy:</strong> <span id="model-accuracy" class="font-mono text-indigo-600">Calculating...</span></p>
+                </div>
+            </div>
+
+            <!-- View Toggle -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                 <h2 class="text-xl font-semibold mb-4">2. Choose Your View</h2>
+                 <div class="flex rounded-md shadow-sm" role="group">
+                    <button type="button" id="global-view-btn" aria-pressed="true" class="flex-1 px-4 py-2 text-sm font-medium text-white bg-indigo-600 border border-indigo-600 rounded-l-lg hover:bg-indigo-700 focus:z-10 focus:ring-2 focus:ring-indigo-500">
+                        Global Importance
+                    </button>
+                    <button type="button" id="local-view-btn" aria-pressed="false" class="flex-1 px-4 py-2 text-sm font-medium text-slate-900 bg-white border-t border-b border-r border-slate-200 hover:bg-slate-100 focus:z-10 focus:ring-2 focus:ring-indigo-500 rounded-r-lg">
+                        Local Explanations
+                    </button>
+                </div>
+            </div>
+
+            <!-- Glossary Card -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Glossary</h2>
+                <ul class="space-y-2 text-slate-600">
+                    <li class="relative">
+                        <strong class="font-semibold text-indigo-600 cursor-pointer glossary-term">Permutation Importance</strong>
+                        <div class="glossary-popup">
+                            <p>A method to calculate feature importance by measuring how much the model's accuracy drops when we randomly shuffle the values of a single feature.</p>
+                        </div>
+                    </li>
+                     <li class="relative">
+                        <strong class="font-semibold text-indigo-600 cursor-pointer glossary-term">Shapley Values (SHAP)</strong>
+                         <div class="glossary-popup">
+                            <p>A game theory approach to explain individual predictions. It calculates the contribution of each feature to push the model's prediction away from the baseline.</p>
+                        </div>
+                    </li>
+                    <li class="relative">
+                        <strong class="font-semibold text-indigo-600 cursor-pointer glossary-term">Baseline</strong>
+                         <div class="glossary-popup">
+                            <p>The average prediction of the model over the entire training dataset. It's the starting point before we consider the features of a specific instance.</p>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Right Column: Visualizations -->
+        <div class="lg:col-span-2 space-y-6">
+            
+            <!-- Global View: Permutation Importance -->
+            <div id="global-view" class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-2">Global View: Permutation Feature Importance</h2>
+                <p class="text-slate-600 mb-4">This chart shows which features the model considers most important overall. Higher bars mean shuffling that feature's values hurt the model's accuracy more.</p>
+                <button id="compute-importance-btn" class="bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors">
+                    Compute Permutation Importance
+                </button>
+                <div class="mt-6">
+                    <canvas id="importance-chart"></canvas>
+                </div>
+            </div>
+
+            <!-- Local View: SHAP Explorer -->
+            <div id="local-view" class="hidden bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-2">Local View: SHAP Explorer</h2>
+                <p class="text-slate-600 mb-4">Select a single flower from the dataset below to see how each of its features contributed to its specific prediction.</p>
+                
+                <!-- Data Table -->
+                <div class="overflow-x-auto rounded-lg border border-slate-200">
+                    <table class="min-w-full divide-y divide-slate-200">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sepal Length</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Sepal Width</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Petal Length</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Petal Width</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="data-table-body" class="bg-white divide-y divide-slate-200">
+                            <!-- Rows will be injected by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- SHAP Waterfall -->
+                <div id="shap-explanation" class="mt-6 hidden">
+                    <h3 class="text-lg font-semibold">SHAP Explanation for Selected Row</h3>
+                    <div id="shap-waterfall" class="mt-4 space-y-2">
+                        <!-- Waterfall will be injected here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            // --- CONFIGURATION --- //
+            // Instructors can easily modify these values
+            const CORRELATION_THRESHOLD = 0.8;
+            const POSITIVE_SHAP_COLOR = 'rgba(59, 130, 246, 0.7)'; // blue-500
+            const NEGATIVE_SHAP_COLOR = 'rgba(239, 68, 68, 0.7)';  // red-500
+            const FEATURE_NAMES = ['sepalLength', 'sepalWidth', 'petalLength', 'petalWidth'];
+
+            // --- MOCK DATA & MODEL --- //
+            // In a real scenario, this would come from a file or API.
+            // We use mock Iris data for this demo.
+            const mockData = [
+                { sepalLength: 5.1, sepalWidth: 3.5, petalLength: 1.4, petalWidth: 0.2, species: 0 }, // Setosa
+                { sepalLength: 4.9, sepalWidth: 3.0, petalLength: 1.4, petalWidth: 0.2, species: 0 },
+                { sepalLength: 7.0, sepalWidth: 3.2, petalLength: 4.7, petalWidth: 1.4, species: 1 }, // Versicolor
+                { sepalLength: 6.4, sepalWidth: 3.2, petalLength: 4.5, petalWidth: 1.5, species: 1 },
+                { sepalLength: 6.3, sepalWidth: 3.3, petalLength: 6.0, petalWidth: 2.5, species: 2 }, // Virginica
+                { sepalLength: 5.8, sepalWidth: 2.7, petalLength: 5.1, petalWidth: 1.9, species: 2 },
+                { sepalLength: 5.0, sepalWidth: 3.4, petalLength: 1.5, petalWidth: 0.2, species: 0 },
+                { sepalLength: 6.0, sepalWidth: 2.2, petalLength: 5.0, petalWidth: 1.5, species: 2 },
+                { sepalLength: 6.7, sepalWidth: 3.1, petalLength: 4.4, petalWidth: 1.4, species: 1 },
+            ];
+
+            // Mock "trained" model. This function simulates a decision tree's prediction.
+            // A real implementation would use TensorFlow.js or a similar library.
+            const mockPredict = (row) => {
+                if (row.petalLength < 2.5) return 0; // Setosa
+                if (row.petalWidth < 1.75) return 1; // Versicolor
+                return 2; // Virginica
+            };
+
+            // --- UI ELEMENTS --- //
+            const modelAccuracyEl = document.getElementById('model-accuracy');
+            const globalViewBtn = document.getElementById('global-view-btn');
+            const localViewBtn = document.getElementById('local-view-btn');
+            const globalView = document.getElementById('global-view');
+            const localView = document.getElementById('local-view');
+            const computeImportanceBtn = document.getElementById('compute-importance-btn');
+            const importanceChartCanvas = document.getElementById('importance-chart');
+            const dataTableBody = document.getElementById('data-table-body');
+            const shapExplanation = document.getElementById('shap-explanation');
+            const shapWaterfall = document.getElementById('shap-waterfall');
+            const correlationAlert = document.getElementById('correlation-alert');
+
+            let importanceChart = null;
+
+            // --- INITIALIZATION --- //
+            
+            // 1. Calculate and display initial model accuracy
+            const calculateAccuracy = () => {
+                let correct = 0;
+                mockData.forEach(row => {
+                    if (mockPredict(row) === row.species) {
+                        correct++;
+                    }
+                });
+                const accuracy = (correct / mockData.length) * 100;
+                modelAccuracyEl.textContent = `${accuracy.toFixed(1)}%`;
+                return accuracy;
+            };
+
+            const initialAccuracy = calculateAccuracy();
+
+            // 2. Check for high correlation
+            const checkCorrelation = () => {
+                // This is a simplified Pearson correlation check for demonstration.
+                // We'll just check petalLength and petalWidth as they are highly correlated in Iris.
+                const x = mockData.map(d => d.petalLength);
+                const y = mockData.map(d => d.petalWidth);
+                const n = x.length;
+                const sumX = x.reduce((a, b) => a + b, 0);
+                const sumY = y.reduce((a, b) => a + b, 0);
+                const sumXY = x.map((xi, i) => xi * y[i]).reduce((a, b) => a + b, 0);
+                const sumX2 = x.map(xi => xi * xi).reduce((a, b) => a + b, 0);
+                const sumY2 = y.map(yi => yi * yi).reduce((a, b) => a + b, 0);
+                
+                const numerator = n * sumXY - sumX * sumY;
+                const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+                const correlation = numerator / denominator;
+
+                if (Math.abs(correlation) > CORRELATION_THRESHOLD) {
+                    correlationAlert.classList.remove('hidden');
+                }
+            };
+
+            checkCorrelation();
+
+            // 3. Populate the data table for the local view
+            const populateTable = () => {
+                mockData.forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${row.sepalLength}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${row.sepalWidth}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${row.petalLength}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${row.petalWidth}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button class="text-indigo-600 hover:text-indigo-900 explain-row-btn" data-index="${index}" aria-label="Explain row ${index + 1}">Explain Row</button>
+                        </td>
+                    `;
+                    dataTableBody.appendChild(tr);
+                });
+            };
+
+            populateTable();
+
+            // --- EVENT LISTENERS --- //
+
+            // View toggling logic
+            globalViewBtn.addEventListener('click', () => {
+                globalView.classList.remove('hidden');
+                localView.classList.add('hidden');
+                globalViewBtn.classList.replace('bg-white', 'bg-indigo-600');
+                globalViewBtn.classList.replace('text-slate-900', 'text-white');
+                globalViewBtn.setAttribute('aria-pressed', 'true');
+                localViewBtn.classList.replace('bg-indigo-600', 'bg-white');
+                localViewBtn.classList.replace('text-white', 'text-slate-900');
+                localViewBtn.setAttribute('aria-pressed', 'false');
+            });
+
+            localViewBtn.addEventListener('click', () => {
+                localView.classList.remove('hidden');
+                globalView.classList.add('hidden');
+                localViewBtn.classList.replace('bg-white', 'bg-indigo-600');
+                localViewBtn.classList.replace('text-slate-900', 'text-white');
+                localViewBtn.setAttribute('aria-pressed', 'true');
+                globalViewBtn.classList.replace('bg-indigo-600', 'bg-white');
+                globalViewBtn.classList.replace('text-white', 'text-slate-900');
+                globalViewBtn.setAttribute('aria-pressed', 'false');
+            });
+
+            // Permutation Importance computation
+            computeImportanceBtn.addEventListener('click', () => {
+                computeImportanceBtn.disabled = true;
+                computeImportanceBtn.textContent = 'Computing...';
+
+                // Simulate async computation
+                setTimeout(() => {
+                    const importances = calculatePermutationImportance();
+                    renderImportanceChart(importances);
+                    computeImportanceBtn.disabled = false;
+                    computeImportanceBtn.textContent = 'Re-compute Permutation Importance';
+                }, 500);
+            });
+
+            // SHAP explanation logic
+            dataTableBody.addEventListener('click', (e) => {
+                if (e.target.classList.contains('explain-row-btn')) {
+                    const index = parseInt(e.target.dataset.index);
+                    const row = mockData[index];
+                    
+                    // Highlight selected row
+                    document.querySelectorAll('#data-table-body tr').forEach(tr => tr.classList.remove('bg-indigo-50'));
+                    e.target.closest('tr').classList.add('bg-indigo-50');
+
+                    // Simulate async SHAP calculation
+                    shapExplanation.classList.remove('hidden');
+                    shapWaterfall.innerHTML = '<p class="text-slate-500">Calculating SHAP values...</p>';
+                    setTimeout(() => {
+                        const shapValues = mockCalculateShap(row);
+                        renderShapWaterfall(shapValues, row);
+                    }, 500);
+                }
+            });
+
+            // --- CORE LOGIC FUNCTIONS --- //
+
+            // Calculates permutation importance by "shuffling" one feature at a time
+            const calculatePermutationImportance = () => {
+                const importances = {};
+                
+                FEATURE_NAMES.forEach(feature => {
+                    const originalValues = mockData.map(d => d[feature]);
+                    const shuffledValues = [...originalValues].sort(() => Math.random() - 0.5);
+                    
+                    let correct = 0;
+                    const shuffledData = mockData.map((d, i) => ({ ...d, [feature]: shuffledValues[i] }));
+                    
+                    shuffledData.forEach(row => {
+                        if (mockPredict(row) === row.species) {
+                            correct++;
+                        }
+                    });
+
+                    const shuffledAccuracy = (correct / mockData.length) * 100;
+                    const drop = initialAccuracy - shuffledAccuracy;
+                    importances[feature] = drop > 0 ? drop : 0; // Importance can't be negative
+                });
+                
+                return importances;
+            };
+
+            // Renders the feature importance bar chart
+            const renderImportanceChart = (importances) => {
+                const sortedFeatures = Object.keys(importances).sort((a, b) => importances[b] - importances[a]);
+                const sortedImportances = sortedFeatures.map(f => importances[f]);
+
+                if (importanceChart) {
+                    importanceChart.destroy();
+                }
+
+                importanceChart = new Chart(importanceChartCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels: sortedFeatures,
+                        datasets: [{
+                            label: 'Accuracy Drop',
+                            data: sortedImportances,
+                            backgroundColor: 'rgba(79, 70, 229, 0.6)', // indigo-600
+                            borderColor: 'rgba(79, 70, 229, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return `Δ Accuracy: -${context.raw.toFixed(2)}%`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Importance (Drop in Model Accuracy %)'
+                                }
+                            }
+                        },
+                        animation: {
+                            duration: 1000,
+                            easing: 'easeInOutQuart'
+                        }
+                    }
+                });
+            };
+
+            // Mocks the calculation of SHAP values for a single instance
+            const mockCalculateShap = (row) => {
+                // This is a highly simplified mock. Real SHAP is complex.
+                // We'll assign contributions based on our simple model's rules.
+                const shap = {};
+                shap.petalLength = row.petalLength < 2.5 ? -2.0 : 1.5;
+                shap.petalWidth = row.petalWidth < 1.75 && row.petalLength >= 2.5 ? -1.0 : 0.8;
+                shap.sepalLength = (row.sepalLength - 5.8) * 0.2; // 5.8 is avg sepal length
+                shap.sepalWidth = (row.sepalWidth - 3.0) * 0.1; // 3.0 is avg sepal width
+                return shap;
+            };
+            
+            // Renders the SHAP waterfall chart
+            const renderShapWaterfall = (shapValues, row) => {
+                shapWaterfall.innerHTML = ''; // Clear previous
+                const baseValue = 1.1; // Average prediction (mocked)
+                let runningTotal = baseValue;
+
+                const contributions = Object.entries(shapValues)
+                    .map(([feature, value]) => ({ feature, value }))
+                    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+                
+                // Baseline
+                const baselineEl = document.createElement('div');
+                baselineEl.innerHTML = `
+                    <div class="flex justify-between items-center text-sm">
+                        <span>Baseline (Average Prediction)</span>
+                        <span class="font-mono">${baseValue.toFixed(2)}</span>
+                    </div>
+                `;
+                shapWaterfall.appendChild(baselineEl);
+
+                // Feature contributions
+                contributions.forEach(({ feature, value }) => {
+                    const isPositive = value > 0;
+                    const barColor = isPositive ? POSITIVE_SHAP_COLOR : NEGATIVE_SHAP_COLOR;
+                    const width = Math.abs(value) * 20; // Scale for display
+
+                    const featureEl = document.createElement('div');
+                    featureEl.className = 'flex items-center space-x-2 text-sm';
+                    featureEl.innerHTML = `
+                        <div class="w-1/3 truncate" title="${feature}=${row[feature]}">${feature} = ${row[feature]}</div>
+                        <div class="w-2/3">
+                            <div class="flex items-center">
+                                <span class="text-xs font-mono mr-1">${isPositive ? '+' : ''}${value.toFixed(2)}</span>
+                                <div class="h-5 shap-bar" style="background-color: ${barColor}; width: 0%;"></div>
+                            </div>
+                        </div>
+                    `;
+                    shapWaterfall.appendChild(featureEl);
+                    
+                    // Animate the bar width
+                    setTimeout(() => {
+                        featureEl.querySelector('.shap-bar').style.width = `${width}%`;
+                    }, 100);
+
+                    runningTotal += value;
+                });
+
+                // Final Prediction
+                const finalEl = document.createElement('div');
+                finalEl.className = 'pt-2 mt-2 border-t';
+                finalEl.innerHTML = `
+                     <div class="flex justify-between items-center text-sm font-bold">
+                        <span>Final Prediction</span>
+                        <span class="font-mono">${runningTotal.toFixed(2)}</span>
+                    </div>
+                `;
+                shapWaterfall.appendChild(finalEl);
+            };
+
+        });
+    </script>
+</body>
+</html>
